@@ -137,7 +137,16 @@ Then connect a client to `https://<hub>/all/mcp`. It exposes every backend's too
   PROD ARC-1 instance. Even if someone connects to `/prod/mcp`, writes are refused at the strongest
   boundary (SAP).
 - **Per-user identity.** Every call runs as the logged-in user via principal propagation — no shared
-  service account.
+  service account. Each MCP session is **bound to the principal that created it** (a different user is
+  rejected — the session id is a routing token, not a credential) and is **idle-reaped** along with its
+  backend connections.
+- **The hub has no local authorization gate — by design.** Inbound auth verifies a valid hub-audience
+  token (one login); it does not require a hub-specific scope. Access is gated *downstream*: the
+  `OAuth2JWTBearer` exchange only succeeds if the user holds the backend's foreign scope (via their role
+  collection), and SAP then enforces the real user's authorizations — so a user who authenticates but
+  lacks the role collection can reach the hub yet do nothing. To also stop an authenticated user from
+  *driving exchanges they can't use*, enforce the hub `use` scope or rate-limit MCP calls (`trust proxy`
+  is already set for accurate per-IP limiting).
 
 ---
 
