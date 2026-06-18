@@ -17,9 +17,16 @@ import {
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import type { Express, Request, RequestHandler } from 'express';
 
-// arc-1's scope names — advertised so clients know what to request. The real
-// grant flows through the backend role collection + the foreign-scope chain.
-export const HUB_SCOPES = ['read', 'write', 'data', 'sql', 'transports', 'git', 'admin'];
+// The hub needs NO arc-1 resource scope of its own: the backend scope (arc1-mcp.admin)
+// reaches the exchanged token via the user's role collection at jwt-bearer time, NOT via
+// the authorize request. But the client must still request a scope that yields a clean,
+// XSUAA-valid hub token. Empirically (verified live on this joule2/IAS subaccount):
+//   • advertise arc-1's scopes → client requests `admin` → hub xsuaa has no such scope → invalid_scope
+//   • advertise none ([])      → client requests no scope → token (foreign-app aud) fails @sap/xssec → invalid_token
+//   • advertise ['openid']     → token = {scope:[openid], aud:[openid,<hub-client>]} → xssec validates ✓
+// So advertise exactly `openid` — a reserved OIDC scope passed through un-qualified
+// (see qualifyXsuaaScopes); the backend ARC-1 still enforces real authorization.
+export const HUB_SCOPES: string[] = ['openid'];
 
 /** Build one env's protected-resource-metadata (RFC 9728): the well-known path + the doc. */
 export function protectedResourceMetadata(appUrl: string, env: string) {
