@@ -1,7 +1,8 @@
 # Build arc-mcp-hub — multi-system MCP hub
 
-> **Status:** Implemented 2026-06-18 (Tasks 1–9); local gates green; pending live BTP e2e (Task 10)
-> before publish.
+> **Status:** Implemented + **live BTP e2e PASSED** 2026-06-18 — 12 backend tools + a real `SAPSearch`
+> read through the deployed hub, as the user (full chain: inbound auth → per-user OAuth2JWTBearer
+> exchange → proxy → SAP principal propagation). Ready to publish.
 
 ## Overview
 
