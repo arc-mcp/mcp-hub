@@ -66,25 +66,40 @@ update the backend's xsuaa instance:
 cf update-service <backend-xsuaa> -c xs-security.json
 ```
 
-The hub's own `xs-security.json` declares `"foreign-scope-references": ["$ACCEPT_GRANTED_SCOPES"]` —
-the wildcard that accepts whatever any backend grants it, so you don't edit the hub per backend. (The
-per-app form `$XSAPPNAME(application,arc1-mcp)` is rejected by XSUAA as an invalid scope name; use the
-wildcard.)
+### 2b-2. Reference the backend scope in a HUB role-template (the part that's easy to miss)
 
-### 2c. Assign developers the backend role collection — under the right IdP
+A backend's scope only reaches a user's token **if it is referenced by a role-template of the app the
+token is issued for** — i.e. the **hub**, not the backend. So the hub's `xs-security.json` must:
+- accept the foreign scope: `"foreign-scope-references": ["$XSAPPNAME(application,arc1-mcp).admin"]`, and
+- reference it inside a role-template (the shipped `DevAdmin`):
+  ```jsonc
+  { "name": "DevAdmin",
+    "scope-references": ["$XSAPPNAME.use", "$XSAPPNAME(application,arc1-mcp).admin"] }
+  ```
+  plus the `arc-mcp-hub Dev Admin` role-collection built from it.
 
-Developers need the backend's role collection (e.g. `ARC-1 Admin`) **assigned under the IdP they
-actually log in with**. For business users on a custom IAS that is `sap.custom`, not `sap.default`:
+**For each additional backend, add a `foreign-scope-reference` + a role-template (+ collection) that
+references *that* backend's scope, then `cf update-service <arc-mcp-hub xsuaa> -c xs-security.json`.**
+The `$XSAPPNAME(application,...)` form is a deploy-time placeholder valid only inside `xs-security.json`
+— never send it in a token request (the live scope is the instance-suffixed `arc1-mcp!t627062.admin`).
+
+### 2c. Assign developers the HUB role collection — under the right IdP
+
+**Assign the *hub's* `arc-mcp-hub Dev Admin` collection, not the backend's `ARC-1 Admin`.** A backend
+role collection is invisible to the hub-issued token; the hub's collection is what carries the backend
+scope through (per SAP's "tightly-coupled principal propagation" pattern). Assign it under the IdP the
+developer actually logs in with — for business users on a custom IAS that's `sap.custom`, not
+`sap.default`:
 
 ```bash
-btp assign security/role-collection "ARC-1 Admin" --to-user dev@example.com --of-idp sap.custom
+btp assign security/role-collection "arc-mcp-hub Dev Admin" --to-user dev@example.com --of-idp sap.custom
 ```
 
-> Wrong IdP here is the #1 setup failure: XSUAA returns `invalid_scope` at login if the user doesn't
-> hold the requested scope **under that IdP**. Check a user's token `origin` claim if unsure.
-
-Also assign them the hub's own collection so they can reach the hub:
-`btp assign security/role-collection "arc-mcp-hub User" --to-user dev@example.com --of-idp sap.custom`.
+> Two #1-setup-failure traps: (1) assigning the **backend** collection instead of the **hub** one →
+> `invalid_scope: "user is not allowed any of the requested scopes"` at the hub→backend exchange;
+> (2) the wrong **IdP** (`sap.default` vs `sap.custom`) → `invalid_scope` at login. Check a token's
+> `origin` claim if unsure. **After assignment the developer must log in again** — a cached token won't
+> carry the new scope.
 
 ### 2d. Harden PROD (defense in depth)
 
@@ -121,9 +136,11 @@ each env.
 
 | Symptom | Cause / fix |
 |---|---|
-| Login → `invalid_scope` | User lacks the backend role collection under the login IdP. Assign it `--of-idp sap.custom` (2c). |
-| Backend 401 `invalid_token` | The hub's xsuaa is missing the `jwt-bearer` grant (it's in `xs-security.json` — redeploy), or the destination `scope` doesn't put the backend xsappname in the audience (2a). |
+| `invalid_scope: "user is not allowed any of the requested scopes"` (hub→backend exchange) | **The #1 issue.** The user was assigned the **backend's** role collection, not the **hub's** `arc-mcp-hub Dev Admin`. A backend collection is invisible to the hub-issued token. Assign the hub collection (2c) **and re-login**. Also confirm the hub's `DevAdmin` role-template references the foreign scope (2b-2). |
+| Login → `invalid_scope` | Wrong IdP for the assignment (`sap.default` vs `sap.custom`). Re-assign `--of-idp sap.custom`; check the token `origin` claim. |
+| `Destination Service auth token error: Bad credentials` | The destination's `clientId`/`clientSecret` are invalid — use the hub xsuaa's **stable** creds (from `cf env`, or a *persistent* service key), not an ephemeral key you then delete. |
+| Backend 401 `invalid_token` | Hub's xsuaa missing the `jwt-bearer` grant (in `xs-security.json` — redeploy), or the destination `scope` doesn't put the backend xsappname in the audience (2a). |
 | `Unable to map issuer` | Hub and backend are in **different subaccounts**. v1 needs same subaccount. |
 | Destination "did not yield a per-user bearer" | The destination isn't `OAuth2JWTBearer` (2a). |
-| Tools list is empty (0) | The user's token has no backend scope — assign a role collection that grants one (2c). Not a transport bug. |
-| `No BTP destination service binding` at startup | The hub isn't bound to a destination service — check `cf services`. |
+| Tools list is empty (0) | The exchanged token reached the backend but carries no backend scope — finish the 2b-2 + 2c chain. Not a transport bug. |
+| `No BTP destination service binding` at startup | Hub isn't bound to a destination service — check `cf services`. |

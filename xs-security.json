@@ -17,15 +17,25 @@
     ]
   },
   "scopes": [{ "name": "$XSAPPNAME.use", "description": "Use the arc-mcp-hub" }],
-  "foreign-scope-references": ["$ACCEPT_GRANTED_SCOPES"],
+  "foreign-scope-references": ["$XSAPPNAME(application,arc1-mcp).admin"],
   "role-templates": [
-    { "name": "HubUser", "description": "May use the arc-mcp-hub", "scope-references": ["$XSAPPNAME.use"] }
+    { "name": "HubUser", "description": "May use the arc-mcp-hub", "scope-references": ["$XSAPPNAME.use"] },
+    {
+      "name": "DevAdmin",
+      "description": "Hub access + backend admin scope (per-backend; add one role-template per backend)",
+      "scope-references": ["$XSAPPNAME.use", "$XSAPPNAME(application,arc1-mcp).admin"]
+    }
   ],
   "role-collections": [
     {
       "name": "arc-mcp-hub User",
       "description": "Use the arc-mcp-hub",
       "role-template-references": ["$XSAPPNAME.HubUser"]
+    },
+    {
+      "name": "arc-mcp-hub Dev Admin",
+      "description": "Hub + backend admin — assign to developers (carries the backend scope through the hub)",
+      "role-template-references": ["$XSAPPNAME.DevAdmin"]
     }
   ]
 }
