@@ -1,0 +1,46 @@
+_schema-version: '3.2'
+ID: arc-mcp-hub
+version: 0.1.0
+description: Multi-system MCP hub for SAP BTP
+
+modules:
+  - name: arc-mcp-hub
+    type: nodejs
+    path: .
+    parameters:
+      memory: 256M
+      disk-quota: 512M
+      health-check-type: http
+      health-check-http-endpoint: /healthz
+    properties:
+      # One entry per backend SAP system. The URL + per-user auth come from the destination.
+      HUB_BACKENDS: '[{"name":"dev","destination":"arc1-dev"}]'
+      ARC_HUB_PUBLIC_URL: '${default-url}'
+      # Keep DCR client_ids stable across redeploys (cf deploy rotates the xsuaa clientsecret).
+      ARC_HUB_DCR_SIGNING_SECRET: 'change-me-openssl-rand-base64-48'
+    build-parameters:
+      builder: custom
+      commands:
+        - npm ci
+        - npm run build
+      ignore:
+        - node_modules/
+        - tests/
+        - 'src/**/*.ts'
+        - docs/
+    requires:
+      - name: arc-mcp-hub-xsuaa
+      - name: arc-mcp-hub-destination
+
+resources:
+  - name: arc-mcp-hub-xsuaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+  - name: arc-mcp-hub-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite

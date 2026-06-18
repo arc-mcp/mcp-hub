@@ -1,0 +1,9 @@
+node_modules/
+src/
+tests/
+docs/
+.github/
+.git/
+*.mtar
+mta_archives/
+*.map

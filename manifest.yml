@@ -1,0 +1,20 @@
+# Simple `cf push` variant. Build first: `npm run build` (pushes the prebuilt dist/).
+# For a full MTA build+deploy, use mta.yaml instead.
+applications:
+  - name: arc-mcp-hub
+    memory: 256M
+    disk_quota: 512M
+    instances: 1
+    buildpacks:
+      - nodejs_buildpack
+    command: npm start
+    health-check-type: http
+    health-check-http-endpoint: /healthz
+    env:
+      # One entry per backend SAP system. The URL + per-user auth come from the destination.
+      HUB_BACKENDS: '[{"name":"dev","destination":"arc1-dev"}]'
+      # ARC_HUB_PUBLIC_URL is optional — derived from the app route if unset.
+      # ARC_HUB_DCR_SIGNING_SECRET: set with `cf set-env` (openssl rand -base64 48).
+    services:
+      - arc-mcp-hub-xsuaa
+      - arc-mcp-hub-destination

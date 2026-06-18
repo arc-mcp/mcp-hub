@@ -1,0 +1,31 @@
+{
+  "xsappname": "arc-mcp-hub",
+  "tenant-mode": "dedicated",
+  "description": "arc-mcp-hub — multi-system MCP hub",
+  "oauth2-configuration": {
+    "token-validity": 3600,
+    "refresh-token-validity": 2592000,
+    "grant-types": ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:jwt-bearer"],
+    "redirect-uris": [
+      "http://localhost:*/**",
+      "https://*.hana.ondemand.com/**",
+      "https://*.applicationstudio.cloud.sap/**",
+      "https://claude.ai/api/mcp/auth_callback",
+      "https://vscode.dev/redirect",
+      "vscode://vscode.microsoft-authentication/**",
+      "cursor://anysphere.cursor-mcp/**"
+    ]
+  },
+  "scopes": [{ "name": "$XSAPPNAME.use", "description": "Use the arc-mcp-hub" }],
+  "foreign-scope-references": ["$XSAPPNAME(application,arc1-mcp)"],
+  "role-templates": [
+    { "name": "HubUser", "description": "May use the arc-mcp-hub", "scope-references": ["$XSAPPNAME.use"] }
+  ],
+  "role-collections": [
+    {
+      "name": "arc-mcp-hub User",
+      "description": "Use the arc-mcp-hub",
+      "role-template-references": ["$XSAPPNAME.HubUser"]
+    }
+  ]
+}
