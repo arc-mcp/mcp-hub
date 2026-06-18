@@ -66,9 +66,10 @@ update the backend's xsuaa instance:
 cf update-service <backend-xsuaa> -c xs-security.json
 ```
 
-The hub's own `xs-security.json` already declares the matching
-`"foreign-scope-references": ["$XSAPPNAME(application,arc1-mcp)"]` — edit that list if your backend
-xsappname differs or you have several.
+The hub's own `xs-security.json` declares `"foreign-scope-references": ["$ACCEPT_GRANTED_SCOPES"]` —
+the wildcard that accepts whatever any backend grants it, so you don't edit the hub per backend. (The
+per-app form `$XSAPPNAME(application,arc1-mcp)` is rejected by XSUAA as an invalid scope name; use the
+wildcard.)
 
 ### 2c. Assign developers the backend role collection — under the right IdP
 
