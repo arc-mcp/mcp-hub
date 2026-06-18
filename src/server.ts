@@ -19,6 +19,11 @@ const wrap =
 /** Build the Express app. Auth + the per-user exchange come from the real BTP bindings. */
 export function createServer(config: HubConfig): Express {
   const app = express();
+  // Behind CF's Gorouter the real client IP arrives in X-Forwarded-For. Trust the first
+  // proxy hop so the MCP SDK auth router's express-rate-limit keys on the real client IP
+  // instead of throwing ERR_ERL_UNEXPECTED_X_FORWARDED_FOR. `1` (not `true`) so a client
+  // can't spoof XFF past the single trusted hop. Mirrors arc-1's server.
+  app.set('trust proxy', 1);
   app.use(express.json());
 
   app.get('/healthz', (_req, res) => {
