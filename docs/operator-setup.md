@@ -3,6 +3,9 @@
 Step-by-step wiring to run `arc-mcp-hub` in front of your ARC-1 instances. Do this once per landscape,
 plus one short step per backend system. Everything here is BTP configuration — no code changes.
 
+For the *requirements* behind these steps — and how to onboard a **non-ARC-1** MCP server — see
+[integrating-an-mcp-server.md](integrating-an-mcp-server.md).
+
 > **Prerequisite:** the hub and all backend ARC-1 instances must be in the **same BTP subaccount**.
 > The per-user token exchange only maps the issuer within one subaccount (cross-subaccount fails with
 > `Unable to map issuer`). Cross-subaccount is on the roadmap, not in v1.
