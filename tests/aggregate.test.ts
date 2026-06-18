@@ -9,7 +9,15 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import express from 'express';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildInstructions, createAllHandlers, mergeTools, parseSystemArg, SYSTEM_PARAM } from '../src/aggregate.js';
+import {
+  buildInstructions,
+  createAllHandlers,
+  expiredSessionIds,
+  mergeTools,
+  parseSystemArg,
+  principalKey,
+  SYSTEM_PARAM,
+} from '../src/aggregate.js';
 import type { Backend } from '../src/config.js';
 import { type FakeBackend, startFakeBackend } from './helpers/mcp-backend.js';
 
@@ -51,6 +59,12 @@ describe('mergeTools', () => {
   it('surfaces the backend description in the enum hint', () => {
     expect(sysSchema(byName('ping') as Tool)?.description).toContain('Dev box');
   });
+
+  it('throws if a backend tool already declares a `system` parameter', () => {
+    expect(() => mergeTools([{ name: 'dev', tools: [tool('Weird', { system: { type: 'string' } })] }])).toThrow(
+      /already declares a 'system'/,
+    );
+  });
 });
 
 describe('parseSystemArg', () => {
@@ -82,6 +96,27 @@ describe('buildInstructions', () => {
   });
 });
 
+describe('principalKey', () => {
+  const jwt = (payload: Record<string, unknown>) => `h.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.s`;
+  it('derives a stable key from user_name + zid', () => {
+    expect(principalKey(jwt({ user_name: 'MARIAN', zid: 'z1' }))).toBe('MARIAN|z1');
+  });
+  it('falls back to sub, then to the raw token', () => {
+    expect(principalKey(jwt({ sub: 's1', zid: 'z2' }))).toBe('s1|z2');
+    expect(principalKey('opaque-token')).toBe('opaque-token');
+  });
+});
+
+describe('expiredSessionIds', () => {
+  it('returns only sessions idle past the ttl', () => {
+    const s = new Map([
+      ['a', { lastSeen: 0 }],
+      ['b', { lastSeen: 600 }],
+    ]);
+    expect(expiredSessionIds(s, 1000, 500)).toEqual(['a']);
+  });
+});
+
 describe('local integration: /all -> two backends', () => {
   let dev: FakeBackend;
   let qa: FakeBackend;
@@ -97,7 +132,7 @@ describe('local integration: /all -> two backends', () => {
     ];
     const h = createAllHandlers({
       backends,
-      getUserJwt: () => 'user-jwt',
+      getUserJwt: (req) => ((req.headers.authorization as string) ?? '').replace(/^Bearer /, '') || 'user-jwt',
       resolve: async (destination) => ({
         url: destination === 'dest-dev' ? dev.url : qa.url,
         bearer: 'test-bearer',
@@ -151,6 +186,29 @@ describe('local integration: /all -> two backends', () => {
     expect(missing.isError).toBe(true);
     const unknown = await client.callTool({ name: 'whoami', arguments: { system: 'prod' } });
     expect(unknown.isError).toBe(true);
+    await client.close();
+  });
+
+  it('rejects a request from a different principal on the same session', async () => {
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { authorization: 'Bearer alice' } },
+    });
+    const client = new Client({ name: 'alice', version: '0.0.0' });
+    await client.connect(transport);
+    const sid = transport.sessionId;
+    expect(sid).toBeTruthy();
+    // raw request reusing alice's session id but presenting bob's bearer
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        'mcp-session-id': sid as string,
+        authorization: 'Bearer bob',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(res.status).toBe(403);
     await client.close();
   });
 });

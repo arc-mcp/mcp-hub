@@ -12,6 +12,11 @@
 // accidental prod write" must be enforced at the BACKEND (prod = read-only SAP
 // user + SAP_ALLOW_WRITES=false), never by this tool surface. The `system` enum,
 // instructions, and required-no-default are disambiguation aids, not controls.
+//
+// Each session holds N backend MCP clients, so it is (a) bound to the principal
+// that initialized it (a different user is rejected — the mcp-session-id is not a
+// bearer) and (b) idle-reaped so a crashed/no-DELETE client can't leak N backend
+// sessions until process restart.
 
 import { randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -31,6 +36,7 @@ import { log } from './log.js';
 import type { GetUserJwt } from './proxy.js';
 
 export const SYSTEM_PARAM = 'system';
+const DEFAULT_SESSION_TTL_MS = 30 * 60_000; // reap a session idle longer than this
 
 type JsonSchema = {
   type?: string;
@@ -53,6 +59,10 @@ const systemLabel = (name: string, description?: string): string => (description
  * enum lists only the systems that actually expose it (so e.g. SAPGit, absent on
  * a NetWeaver box, can't be requested there). First backend wins on the base tool
  * definition; backend annotations pass through unchanged.
+ *
+ * Throws if a backend tool already declares a `system` parameter — the aggregator
+ * would otherwise silently overwrite it and strip the backend's own argument. Fail
+ * loud so the operator excludes that backend from `/all` (or renames the param).
  */
 export function mergeTools(perBackend: BackendTools[]): Tool[] {
   const byName = new Map<string, { tool: Tool; systems: string[] }>();
@@ -69,6 +79,12 @@ export function mergeTools(perBackend: BackendTools[]): Tool[] {
   for (const { tool, systems } of byName.values()) {
     const schema: JsonSchema = (tool.inputSchema as JsonSchema | undefined) ?? { type: 'object', properties: {} };
     const properties: Record<string, unknown> = { ...(schema.properties ?? {}) };
+    if (SYSTEM_PARAM in properties) {
+      throw new Error(
+        `Cannot aggregate tool '${tool.name}' on /all: it already declares a '${SYSTEM_PARAM}' parameter, which ` +
+          'the aggregator needs as the system selector. Exclude that backend from /all (or rename the parameter).',
+      );
+    }
     properties[SYSTEM_PARAM] = {
       type: 'string',
       enum: [...systems],
@@ -112,9 +128,39 @@ export function buildInstructions(backends: Backend[]): string {
   );
 }
 
+/**
+ * Stable owner key from an (already bearer-verified) hub token, used to bind a
+ * session to one principal. The mcp-session-id is a routing token, not proof of
+ * identity, so a request whose principal differs from the session's owner is
+ * rejected. Falls back to the raw token for non-JWT inputs (e.g. tests).
+ */
+export function principalKey(jwt: string): string {
+  const parts = jwt.split('.');
+  if (parts.length === 3) {
+    try {
+      const p = JSON.parse(Buffer.from(parts[1], 'base64url').toString()) as Record<string, unknown>;
+      const id = p.user_name ?? p.sub ?? p.email;
+      const zone = p.zid ?? p.zone_uuid ?? '';
+      if (typeof id === 'string' && id) return `${id}|${String(zone)}`;
+    } catch {
+      // not a decodable JWT — fall through to the raw-token key
+    }
+  }
+  return jwt;
+}
+
+/** Session ids whose `lastSeen` is older than `ttlMs` (idle-expiry sweep). */
+export function expiredSessionIds(sessions: Map<string, { lastSeen: number }>, now: number, ttlMs: number): string[] {
+  const out: string[] = [];
+  for (const [id, s] of sessions) if (now - s.lastSeen > ttlMs) out.push(id);
+  return out;
+}
+
 interface AllSession {
   transport: StreamableHTTPServerTransport;
   currentUserJwt: string;
+  owner: string;
+  lastSeen: number;
   clients: Map<string, Client>;
 }
 
@@ -123,6 +169,14 @@ export interface AllHandlers {
   get: (req: Request, res: Response) => Promise<void>;
   del: (req: Request, res: Response) => Promise<void>;
 }
+
+const forbidden = (res: Response): void => {
+  res.status(403).json({
+    jsonrpc: '2.0',
+    id: null,
+    error: { code: -32000, message: 'Forbidden: session belongs to a different user' },
+  });
+};
 
 /**
  * Build the POST/GET/DELETE handlers for `/all/mcp`: an aggregating MCP server
@@ -134,12 +188,33 @@ export function createAllHandlers(opts: {
   getUserJwt: GetUserJwt;
   resolve: Resolver;
   version?: string;
+  now?: () => number;
+  sessionTtlMs?: number;
 }): AllHandlers {
   const { backends, getUserJwt, resolve } = opts;
   const version = opts.version ?? process.env.npm_package_version ?? '0.0.0';
+  const now = opts.now ?? Date.now;
+  const ttlMs = opts.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
   const sessions = new Map<string, AllSession>();
   const instructions = buildInstructions(backends);
   const validSystems = backends.map((b) => b.name);
+
+  function closeSession(id: string): void {
+    const s = sessions.get(id);
+    if (!s) return;
+    sessions.delete(id); // delete first so a re-entrant onsessionclosed is a no-op
+    for (const c of s.clients.values()) void c.close().catch(() => {});
+    void s.transport.close().catch(() => {});
+  }
+
+  // Opportunistic idle reaping (no leaked timer): every request bounds the session
+  // map, closing sessions — and their N backend clients — idle past the TTL.
+  function reapIdle(): void {
+    for (const id of expiredSessionIds(sessions, now(), ttlMs)) {
+      log.info('all: reaping idle session', { id });
+      closeSession(id);
+    }
+  }
 
   // Get-or-connect a backend MCP client for this session. The backend URL is fixed
   // for the session; the per-user bearer is re-resolved on every outbound request
@@ -198,27 +273,32 @@ export function createAllHandlers(opts: {
   }
 
   const post = async (req: Request, res: Response): Promise<void> => {
+    reapIdle();
     const userJwt = getUserJwt(req);
+    const owner = principalKey(userJwt);
     const sid = req.headers['mcp-session-id'] as string | undefined;
 
     const existing = sid ? sessions.get(sid) : undefined;
     if (existing) {
+      if (existing.owner !== owner) {
+        forbidden(res);
+        return;
+      }
       existing.currentUserJwt = userJwt;
+      existing.lastSeen = now();
       await existing.transport.handleRequest(req, res, req.body);
       return;
     }
 
     if (!sid && isInitializeRequest(req.body)) {
-      const session: AllSession = { currentUserJwt: userJwt, clients: new Map() } as AllSession;
+      const session: AllSession = { currentUserJwt: userJwt, owner, lastSeen: now(), clients: new Map() } as AllSession;
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: randomUUID,
         onsessioninitialized: (id) => {
           sessions.set(id, session);
         },
         onsessionclosed: (id) => {
-          const s = sessions.get(id);
-          if (s) for (const c of s.clients.values()) void c.close().catch(() => {});
-          sessions.delete(id);
+          closeSession(id);
         },
       });
       session.transport = transport;
@@ -233,13 +313,20 @@ export function createAllHandlers(opts: {
   };
 
   const byId = async (req: Request, res: Response): Promise<void> => {
+    reapIdle();
     const sid = req.headers['mcp-session-id'] as string | undefined;
     const session = sid ? sessions.get(sid) : undefined;
     if (!session) {
       res.status(404).end(); // -> client re-initializes
       return;
     }
-    session.currentUserJwt = getUserJwt(req);
+    const userJwt = getUserJwt(req);
+    if (session.owner !== principalKey(userJwt)) {
+      forbidden(res);
+      return;
+    }
+    session.currentUserJwt = userJwt;
+    session.lastSeen = now();
     await session.transport.handleRequest(req, res);
   };
 

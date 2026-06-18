@@ -85,6 +85,10 @@ Then connect a client to `https://<hub>/all/mcp`. It exposes every backend's too
   have the per-connection safety of the path-scoped routes. Make a misroute harmless instead: a PROD
   backend must run **`SAP_ALLOW_WRITES=false` + a read-only SAP user**. The `system` enum, server
   `instructions`, and a required-no-default param are disambiguation aids — not controls.
+- **Sessions are principal-bound + idle-reaped.** Each `/all` session is tied to the user who created it
+  (a different principal is rejected — the session id is not a credential) and is closed after an idle
+  timeout together with its backend connections. A backend whose *own* tools already declare a `system`
+  parameter is unsupported by `/all` (it fails loud at list time) — use that backend's per-system route.
 - Prefer the per-system routes for routine single-system work; use `/all` for cross-system tasks.
 
 ---
