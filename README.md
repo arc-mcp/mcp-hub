@@ -1,5 +1,7 @@
 # arc-mcp-hub
 
+[![CI](https://github.com/arc-mcp/mcp-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/arc-mcp/mcp-hub/actions/workflows/ci.yml)
+
 A thin, **deterministic** MCP hub for SAP BTP. It puts multiple [ARC-1](https://github.com/arc-mcp)
 instances — one per SAP system (DEV / QA / PROD) — behind **one front door** with **one login**, while
 keeping each system fully isolated and preserving per-user SAP identity.
