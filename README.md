@@ -26,6 +26,8 @@ transparently relays the connection. Each system's tools come through unchanged.
   independently-configured servers.
 - You want **per-user SAP identity** preserved end-to-end (principal propagation), per system.
 - All those ARC-1 instances live in **one BTP subaccount**.
+- You want to front **other SAP MCP servers** too, not only ARC-1 — any XSUAA-protected,
+  Streamable-HTTP MCP server qualifies ([how](docs/integrating-an-mcp-server.md)).
 
 ## When NOT to use it
 
@@ -122,6 +124,13 @@ npm run typecheck
 npm run lint
 npm run build
 ```
+
+## Docs
+
+- [architecture.md](docs/architecture.md) — request flow, modules, invariants.
+- [operator-setup.md](docs/operator-setup.md) — step-by-step BTP wiring per backend.
+- [integrating-an-mcp-server.md](docs/integrating-an-mcp-server.md) — requirements + what to change to
+  put **any** MCP server behind the hub, with primary-source BTP/XSUAA references.
 
 ## License
 

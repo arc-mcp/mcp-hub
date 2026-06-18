@@ -58,3 +58,9 @@ MCP client                arc-mcp-hub                         backend ARC-1     
 3. **Connection-scoped systems.** One env per session — cross-environment is structurally impossible.
 4. **SAP is the final authority.** Per-user principal propagation means SAP enforces real
    authorizations; the hub does not need to (and must not) re-implement them.
+
+## See also
+
+- [integrating-an-mcp-server.md](integrating-an-mcp-server.md) — backend requirements + what to change
+  in an MCP server to sit behind the hub (with BTP/XSUAA references).
+- [operator-setup.md](operator-setup.md) — per-backend BTP wiring.
