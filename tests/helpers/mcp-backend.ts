@@ -13,7 +13,9 @@ export interface FakeBackend {
   close: () => Promise<void>;
 }
 
-export async function startFakeBackend(): Promise<FakeBackend> {
+export async function startFakeBackend(opts: { label?: string; extraTools?: string[] } = {}): Promise<FakeBackend> {
+  const label = opts.label ?? 'backend-user';
+  const extraTools = opts.extraTools ?? [];
   const transports = new Map<string, StreamableHTTPServerTransport>();
   const app = express();
   app.use(express.json());
@@ -33,8 +35,13 @@ export async function startFakeBackend(): Promise<FakeBackend> {
         content: [{ type: 'text' as const, text: 'pong' }],
       }));
       server.registerTool('whoami', { description: 'returns a fixed id' }, async () => ({
-        content: [{ type: 'text' as const, text: 'backend-user' }],
+        content: [{ type: 'text' as const, text: label }],
       }));
+      for (const tname of extraTools) {
+        server.registerTool(tname, { description: `extra tool ${tname}` }, async () => ({
+          content: [{ type: 'text' as const, text: `${tname}@${label}` }],
+        }));
+      }
       await server.connect(transport);
     }
     if (!transport) {

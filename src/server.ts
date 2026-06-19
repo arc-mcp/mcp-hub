@@ -1,6 +1,7 @@
 // Server assembly: shared inbound auth + a transparent proxy route per backend.
 
 import express, { type Express, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
+import { createAllHandlers } from './aggregate.js';
 import { getUserJwt, setupInboundAuth } from './auth.js';
 import type { HubConfig } from './config.js';
 import { createResolver } from './exchange.js';
@@ -30,10 +31,9 @@ export function createServer(config: HubConfig): Express {
     res.json({ status: 'ok', backends: config.backends.map((b) => b.name) });
   });
 
-  const bearers = setupInboundAuth(
-    app,
-    config.backends.map((b) => b.name),
-  );
+  const envNames = config.backends.map((b) => b.name);
+  if (config.allEndpoint) envNames.push('all');
+  const bearers = setupInboundAuth(app, envNames);
   const resolve = createResolver();
 
   for (const backend of config.backends) {
@@ -47,6 +47,15 @@ export function createServer(config: HubConfig): Express {
     app.get(path, bearer, wrap(get));
     app.delete(path, bearer, wrap(del));
     log.info('mounted backend', { env: backend.name, destination: backend.destination, path });
+  }
+
+  // Optional aggregated endpoint: one URL, every system via a required `system` param.
+  if (config.allEndpoint) {
+    const all = createAllHandlers({ backends: config.backends, getUserJwt, resolve });
+    app.post('/all/mcp', bearers.all, wrap(all.post));
+    app.get('/all/mcp', bearers.all, wrap(all.get));
+    app.delete('/all/mcp', bearers.all, wrap(all.del));
+    log.info('mounted aggregated endpoint', { path: '/all/mcp', systems: config.backends.map((b) => b.name) });
   }
 
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

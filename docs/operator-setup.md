@@ -149,3 +149,31 @@ each env.
 | Destination "did not yield a per-user bearer" | The destination isn't `OAuth2JWTBearer` (2a). |
 | Tools list is empty (0) | The exchanged token reached the backend but carries no backend scope — finish the 2b-2 + 2c chain. Not a transport bug. |
 | `No BTP destination service binding` at startup | Hub isn't bound to a destination service — check `cf services`. |
+
+---
+
+## Optional: the `/all` endpoint — one URL, every system
+
+By default each system has its own path (`/dev/mcp`), binding the system to the connection. To let a
+client reach **all** systems through one URL, enable the aggregated endpoint:
+
+```bash
+# optionally label each system for the model
+cf set-env arc-mcp-hub HUB_BACKENDS '[{"name":"dev","destination":"arc1-dev","description":"S/4HANA 2023 (758)"},{"name":"s4-2025","destination":"arc1-2025","description":"ABAP Platform 2025 (816)"}]'
+cf set-env arc-mcp-hub HUB_ALL_ENDPOINT true
+cf restart arc-mcp-hub
+```
+
+Connect a client to `https://<hub>/all/mcp`. Every tool gains a **required `system` parameter** whose enum
+lists the systems that expose it; the model names the target system on each call. Cost is ≈ one tool set
+(homogeneous backends → no per-system description duplication), not N×.
+
+> **Safety:** `/all` lets the model choose the system per call, so it does **not** have the per-connection
+> isolation of the path-scoped routes. Make a misroute *harmless*, not merely unlikely: on any PROD
+> backend set `SAP_ALLOW_WRITES=false` **and** point ARC-1 at a **read-only SAP user**. The `system` enum
+> and server instructions steer the model but are not controls (per the MCP spec, instructions are
+> best-effort).
+
+**Verify:** connect to `/all/mcp`, confirm the tools show a `system` parameter, then run a read on two
+systems (e.g. `SAPRead` `type=COMPONENTS` with `system=dev` vs `system=s4-2025`) and check the `SAP_BASIS`
+release differs — proving each call routed to a distinct backend as you.

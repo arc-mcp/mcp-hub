@@ -33,13 +33,16 @@ transparently relays the connection. Each system's tools come through unchanged.
 
 - **One SAP system only** → just point your client at that ARC-1 directly. The hub adds nothing.
 - **You want a natural-language assistant** that reasons across systems → that's a different,
-  LLM-in-the-middle product. This hub is **deterministic routing only — no server-side LLM**, no merged
-  tool list, no "ask it anything."
+  LLM-in-the-middle product. This hub is **deterministic routing only — no server-side LLM** (the
+  optional [`/all`](#optional-one-endpoint-for-every-system) endpoint merges tool lists, but never
+  reasons or calls a model).
 - **Backends in different subaccounts** → not supported in v1 (the token exchange only maps within one
   subaccount). See [roadmap](#roadmap).
-- **You want the model to pick the system at call time** → intentionally unsupported. The system is
-  bound by *which endpoint you connect to*, so an agent can never accidentally write to PROD from a DEV
-  conversation. That safety is the whole point.
+- **You want the model to pick the system at call time** → off by default (the path-scoped routes bind
+  the system to *which endpoint you connect to*, so an agent can't accidentally write to PROD from a DEV
+  conversation). If you do want it, enable the opt-in
+  [`/all` endpoint](#optional-one-endpoint-for-every-system) — but keep PROD read-only at the backend,
+  because that structural guard (not the tool surface) is what makes a misroute harmless.
 
 ---
 
@@ -54,6 +57,39 @@ real authorizations** — a user without PROD access simply can't do anything on
 connect to `/prod/mcp`.
 
 There is no shared service account and no LLM in the path. See [docs/architecture.md](docs/architecture.md).
+
+---
+
+## Optional: one endpoint for every system
+
+By default you point a client at *one* system (`/dev/mcp`). If instead you want **all systems through a
+single connection**, enable the aggregated endpoint:
+
+```bash
+cf set-env arc-mcp-hub HUB_ALL_ENDPOINT true && cf restart arc-mcp-hub
+```
+
+Then connect a client to `https://<hub>/all/mcp`. It exposes every backend's tools **once**, each with a
+**required `system` parameter** naming which SAP system to act on (`dev`, `s4-2025`, …). Add an optional
+`description` per backend so the model sees what each system is:
+
+```json
+[{ "name": "dev", "destination": "arc1-dev", "description": "S/4HANA 2023 (758)" },
+ { "name": "s4-2025", "destination": "arc1-2025", "description": "ABAP Platform 2025 (816)" }]
+```
+
+- **Cost ≈ one tool set.** The backends are the same server (ARC-1) against different SAP targets, so a
+  shared tool set + a `system` param doesn't duplicate descriptions — `/all` costs about the same as a
+  single per-system endpoint, not N×.
+- **Trade-off — no structural isolation.** The model picks the system per call, so `/all` does **not**
+  have the per-connection safety of the path-scoped routes. Make a misroute harmless instead: a PROD
+  backend must run **`SAP_ALLOW_WRITES=false` + a read-only SAP user**. The `system` enum, server
+  `instructions`, and a required-no-default param are disambiguation aids — not controls.
+- **Sessions are principal-bound + idle-reaped.** Each `/all` session is tied to the user who created it
+  (a different principal is rejected — the session id is not a credential) and is closed after an idle
+  timeout together with its backend connections. A backend whose *own* tools already declare a `system`
+  parameter is unsupported by `/all` (it fails loud at list time) — use that backend's per-system route.
+- Prefer the per-system routes for routine single-system work; use `/all` for cross-system tasks.
 
 ---
 
@@ -84,7 +120,8 @@ There is no shared service account and no LLM in the path. See [docs/architectur
 
 | Env var | Required | Description |
 |---|---|---|
-| `HUB_BACKENDS` | yes | JSON array of `{ name, destination }`. `name` is the URL segment (lowercase/digits/hyphen); `destination` is the BTP destination resolving to that backend. |
+| `HUB_BACKENDS` | yes | JSON array of `{ name, destination, description? }`. `name` is the URL segment (lowercase/digits/hyphen, not `all`); `destination` is the BTP destination resolving to that backend; optional `description` (e.g. `"ABAP Platform 2025"`) labels the system in the `/all` endpoint's `system` enum + instructions. |
+| `HUB_ALL_ENDPOINT` | no | `true` mounts the optional aggregated [`/all/mcp`](#optional-one-endpoint-for-every-system) (one URL, every system via a required `system` param). Default off — the per-system routes are the safe default. |
 | `ARC_HUB_PUBLIC_URL` | no | The hub's public URL for OAuth metadata. Derived from the CF route if unset; set it behind a reverse proxy/custom domain. |
 | `ARC_HUB_DCR_SIGNING_SECRET` | recommended | Stable secret so cached client_ids survive `cf deploy`. `openssl rand -base64 48`. |
 | `ARC_HUB_ALLOWED_ORIGINS` | no | CSV CORS allowlist for browser MCP clients (e.g. `https://claude.ai`). |
