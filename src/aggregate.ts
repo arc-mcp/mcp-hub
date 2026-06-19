@@ -34,9 +34,13 @@ import type { Backend } from './config.js';
 import type { Resolver } from './exchange.js';
 import { log } from './log.js';
 import type { GetUserJwt } from './proxy.js';
+import { expiredSessionIds, principalKey } from './session.js';
+
+// Re-exported so existing imports/tests that reach for these via ./aggregate keep working.
+export { expiredSessionIds, principalKey } from './session.js';
 
 export const SYSTEM_PARAM = 'system';
-const DEFAULT_SESSION_TTL_MS = 30 * 60_000; // reap a session idle longer than this
+const DEFAULT_SESSION_TTL_MS = 30 * 24 * 60 * 60_000; // 30 days; server.ts overrides via config (HUB_SESSION_TTL_MINUTES)
 
 type JsonSchema = {
   type?: string;
@@ -126,34 +130,6 @@ export function buildInstructions(backends: Backend[]): string {
     `Always set \`${SYSTEM_PARAM}\` to the system the user intends — never assume. ` +
     'A tool may be unavailable on some systems. When unsure which system, ask the user.'
   );
-}
-
-/**
- * Stable owner key from an (already bearer-verified) hub token, used to bind a
- * session to one principal. The mcp-session-id is a routing token, not proof of
- * identity, so a request whose principal differs from the session's owner is
- * rejected. Falls back to the raw token for non-JWT inputs (e.g. tests).
- */
-export function principalKey(jwt: string): string {
-  const parts = jwt.split('.');
-  if (parts.length === 3) {
-    try {
-      const p = JSON.parse(Buffer.from(parts[1], 'base64url').toString()) as Record<string, unknown>;
-      const id = p.user_name ?? p.sub ?? p.email;
-      const zone = p.zid ?? p.zone_uuid ?? '';
-      if (typeof id === 'string' && id) return `${id}|${String(zone)}`;
-    } catch {
-      // not a decodable JWT — fall through to the raw-token key
-    }
-  }
-  return jwt;
-}
-
-/** Session ids whose `lastSeen` is older than `ttlMs` (idle-expiry sweep). */
-export function expiredSessionIds(sessions: Map<string, { lastSeen: number }>, now: number, ttlMs: number): string[] {
-  const out: string[] = [];
-  for (const [id, s] of sessions) if (now - s.lastSeen > ttlMs) out.push(id);
-  return out;
 }
 
 interface AllSession {

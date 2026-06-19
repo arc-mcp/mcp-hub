@@ -18,6 +18,7 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { Request, Response } from 'express';
 import { log } from './log.js';
+import { expiredSessionIds, principalKey } from './session.js';
 
 /** Resolve the backend URL + per-user bearer for a given (current) user JWT. */
 export type Resolve = (userJwt: string) => Promise<{ url: string; bearer: string }>;
@@ -30,6 +31,10 @@ interface Session {
   backend: StreamableHTTPClientTransport;
   /** Updated on every inbound request so the outbound bearer tracks the latest user token. */
   currentUserJwt: string;
+  /** Principal that initialized the session; a request from a different principal is rejected. */
+  owner: string;
+  /** Last request time, for idle reaping. */
+  lastSeen: number;
 }
 
 export interface EnvHandlers {
@@ -74,24 +79,64 @@ export function mcpProxy({ toClient, toServer }: { toClient: Transport; toServer
  * `getUserJwt` extracts the validated user token; `resolve` turns it into the
  * backend URL + per-user bearer.
  */
-export function createEnvHandlers(opts: { getUserJwt: GetUserJwt; resolve: Resolve }): EnvHandlers {
+export function createEnvHandlers(opts: {
+  getUserJwt: GetUserJwt;
+  resolve: Resolve;
+  now?: () => number;
+  sessionTtlMs?: number;
+}): EnvHandlers {
   const { getUserJwt, resolve } = opts;
+  const now = opts.now ?? Date.now;
+  const ttlMs = opts.sessionTtlMs ?? 30 * 24 * 60 * 60_000; // 30 days; server.ts overrides via config
   const sessions = new Map<string, Session>();
 
+  function closeSession(id: string): void {
+    const s = sessions.get(id);
+    if (!s) return;
+    sessions.delete(id); // delete first so a re-entrant onsessionclosed is a no-op
+    void s.client.close().catch(() => {}); // chains backend.close() via mcpProxy
+    void s.backend.close().catch(() => {});
+  }
+
+  // Opportunistic idle reaping: every request bounds the session map, closing the
+  // client + backend transports of sessions idle past the TTL — a crashed/no-DELETE
+  // client can't leak until process restart.
+  function reapIdle(): void {
+    for (const id of expiredSessionIds(sessions, now(), ttlMs)) {
+      log.info('proxy: reaping idle session', { id });
+      closeSession(id);
+    }
+  }
+
+  const forbidden = (res: Response): void => {
+    res.status(403).json({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32000, message: 'Forbidden: session belongs to a different user' },
+    });
+  };
+
   const post = async (req: Request, res: Response): Promise<void> => {
+    reapIdle();
     const userJwt = getUserJwt(req);
+    const owner = principalKey(userJwt);
     const sid = req.headers['mcp-session-id'] as string | undefined;
 
     const existing = sid ? sessions.get(sid) : undefined;
     if (existing) {
+      if (existing.owner !== owner) {
+        forbidden(res);
+        return;
+      }
       existing.currentUserJwt = userJwt;
+      existing.lastSeen = now();
       await existing.client.handleRequest(req, res, req.body);
       return;
     }
 
     if (!sid && isInitializeRequest(req.body)) {
       const { url } = await resolve(userJwt); // backend URL is fixed for the session
-      const session = { currentUserJwt: userJwt } as Session;
+      const session = { currentUserJwt: userJwt, owner, lastSeen: now() } as Session;
 
       const backend = new StreamableHTTPClientTransport(new URL(url), {
         fetch: async (input, init) => {
@@ -107,7 +152,7 @@ export function createEnvHandlers(opts: { getUserJwt: GetUserJwt; resolve: Resol
           sessions.set(id, session);
         },
         onsessionclosed: (id) => {
-          sessions.delete(id);
+          closeSession(id);
         },
       });
       session.client = client;
@@ -126,13 +171,20 @@ export function createEnvHandlers(opts: { getUserJwt: GetUserJwt; resolve: Resol
   };
 
   const byId = async (req: Request, res: Response): Promise<void> => {
+    reapIdle();
     const sid = req.headers['mcp-session-id'] as string | undefined;
     const session = sid ? sessions.get(sid) : undefined;
     if (!session) {
       res.status(404).end(); // -> client re-initializes (MetaMCP #294)
       return;
     }
-    session.currentUserJwt = getUserJwt(req);
+    const userJwt = getUserJwt(req);
+    if (session.owner !== principalKey(userJwt)) {
+      forbidden(res);
+      return;
+    }
+    session.currentUserJwt = userJwt;
+    session.lastSeen = now();
     await session.client.handleRequest(req, res);
   };
 

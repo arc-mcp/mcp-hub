@@ -122,6 +122,7 @@ Then connect a client to `https://<hub>/all/mcp`. It exposes every backend's too
 |---|---|---|
 | `HUB_BACKENDS` | yes | JSON array of `{ name, destination, description? }`. `name` is the URL segment (lowercase/digits/hyphen, not `all`); `destination` is the BTP destination resolving to that backend; optional `description` (e.g. `"ABAP Platform 2025"`) labels the system in the `/all` endpoint's `system` enum + instructions. |
 | `HUB_ALL_ENDPOINT` | no | `true` mounts the optional aggregated [`/all/mcp`](#optional-one-endpoint-for-every-system) (one URL, every system via a required `system` param). Default off — the per-system routes are the safe default. |
+| `HUB_SESSION_TTL_MINUTES` | no | Idle timeout before a session (and its backend connections) is reaped. Default **43200 (30 days)**. Only affects *abandoned* sessions — an active client refreshes it on every request — so a long value is safe; lower it for high-concurrency multi-user deployments. |
 | `ARC_HUB_PUBLIC_URL` | no | The hub's public URL for OAuth metadata. Derived from the CF route if unset; set it behind a reverse proxy/custom domain. |
 | `ARC_HUB_DCR_SIGNING_SECRET` | recommended | Stable secret so cached client_ids survive `cf deploy`. `openssl rand -base64 48`. |
 | `ARC_HUB_ALLOWED_ORIGINS` | no | CSV CORS allowlist for browser MCP clients (e.g. `https://claude.ai`). |
@@ -137,7 +138,16 @@ Then connect a client to `https://<hub>/all/mcp`. It exposes every backend's too
   PROD ARC-1 instance. Even if someone connects to `/prod/mcp`, writes are refused at the strongest
   boundary (SAP).
 - **Per-user identity.** Every call runs as the logged-in user via principal propagation — no shared
-  service account.
+  service account. Each MCP session is **bound to the principal that created it** (a different user is
+  rejected — the session id is a routing token, not a credential) and is **idle-reaped** along with its
+  backend connections.
+- **The hub has no local authorization gate — by design.** Inbound auth verifies a valid hub-audience
+  token (one login); it does not require a hub-specific scope. Access is gated *downstream*: the
+  `OAuth2JWTBearer` exchange only succeeds if the user holds the backend's foreign scope (via their role
+  collection), and SAP then enforces the real user's authorizations — so a user who authenticates but
+  lacks the role collection can reach the hub yet do nothing. To also stop an authenticated user from
+  *driving exchanges they can't use*, enforce the hub `use` scope or rate-limit MCP calls (`trust proxy`
+  is already set for accurate per-IP limiting).
 
 ---
 
@@ -149,8 +159,13 @@ Then connect a client to `https://<hub>/all/mcp`. It exposes every backend's too
 
 ## Roadmap
 
+Full deferred/open-items list: **[docs/roadmap.md](docs/roadmap.md)**. Highlights:
+
 - Cross-subaccount backends (`OAuth2SAMLBearerAssertion` / shared IAS).
 - Horizontal scale (shared session store).
+- Read-only-aware tool surface (omit write tools when every backend is read-only).
+- Hub-local authorization gate / MCP rate-limiting.
+- A local (stdio) edition for non-BTP arc-1 setups.
 
 ## Development
 

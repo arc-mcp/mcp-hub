@@ -22,7 +22,7 @@ describe('local integration: proxy -> backend', () => {
     const app = express();
     app.use(express.json());
     const h = createEnvHandlers({
-      getUserJwt: () => 'user-jwt',
+      getUserJwt: (req) => ((req.headers.authorization as string) ?? '').replace(/^Bearer /, '') || 'user-jwt',
       resolve: async () => ({ url: backend.url, bearer: 'test-bearer' }),
     });
     app.post('/dev/mcp', (req, res) => {
@@ -55,6 +55,28 @@ describe('local integration: proxy -> backend', () => {
     const result = await client.callTool({ name: 'ping' });
     expect(JSON.stringify(result)).toContain('pong');
 
+    await client.close();
+  });
+
+  it('rejects a request from a different principal on the same session', async () => {
+    const transport = new StreamableHTTPClientTransport(new URL(proxyUrl), {
+      requestInit: { headers: { authorization: 'Bearer alice' } },
+    });
+    const client = new Client({ name: 'alice', version: '0.0.0' });
+    await client.connect(transport);
+    const sid = transport.sessionId;
+    expect(sid).toBeTruthy();
+    const res = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        'mcp-session-id': sid as string,
+        authorization: 'Bearer bob',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(res.status).toBe(403);
     await client.close();
   });
 });
