@@ -122,6 +122,7 @@ Then connect a client to `https://<hub>/all/mcp`. It exposes every backend's too
 |---|---|---|
 | `HUB_BACKENDS` | yes | JSON array of `{ name, destination, description? }`. `name` is the URL segment (lowercase/digits/hyphen, not `all`); `destination` is the BTP destination resolving to that backend; optional `description` (e.g. `"ABAP Platform 2025"`) labels the system in the `/all` endpoint's `system` enum + instructions. |
 | `HUB_ALL_ENDPOINT` | no | `true` mounts the optional aggregated [`/all/mcp`](#optional-one-endpoint-for-every-system) (one URL, every system via a required `system` param). Default off — the per-system routes are the safe default. |
+| `HUB_SESSION_TTL_MINUTES` | no | Idle timeout before a session (and its backend connections) is reaped. Default **43200 (30 days)**. Only affects *abandoned* sessions — an active client refreshes it on every request — so a long value is safe; lower it for high-concurrency multi-user deployments. |
 | `ARC_HUB_PUBLIC_URL` | no | The hub's public URL for OAuth metadata. Derived from the CF route if unset; set it behind a reverse proxy/custom domain. |
 | `ARC_HUB_DCR_SIGNING_SECRET` | recommended | Stable secret so cached client_ids survive `cf deploy`. `openssl rand -base64 48`. |
 | `ARC_HUB_ALLOWED_ORIGINS` | no | CSV CORS allowlist for browser MCP clients (e.g. `https://claude.ai`). |
@@ -158,8 +159,13 @@ Then connect a client to `https://<hub>/all/mcp`. It exposes every backend's too
 
 ## Roadmap
 
+Full deferred/open-items list: **[docs/roadmap.md](docs/roadmap.md)**. Highlights:
+
 - Cross-subaccount backends (`OAuth2SAMLBearerAssertion` / shared IAS).
 - Horizontal scale (shared session store).
+- Read-only-aware tool surface (omit write tools when every backend is read-only).
+- Hub-local authorization gate / MCP rate-limiting.
+- A local (stdio) edition for non-BTP arc-1 setups.
 
 ## Development
 

@@ -41,6 +41,7 @@ export function createServer(config: HubConfig): Express {
     const { post, get, del } = createEnvHandlers({
       getUserJwt,
       resolve: (userJwt) => resolve(backend.destination, userJwt),
+      sessionTtlMs: config.sessionTtlMs,
     });
     const path = `/${backend.name}/mcp`;
     app.post(path, bearer, wrap(post));
@@ -51,7 +52,12 @@ export function createServer(config: HubConfig): Express {
 
   // Optional aggregated endpoint: one URL, every system via a required `system` param.
   if (config.allEndpoint) {
-    const all = createAllHandlers({ backends: config.backends, getUserJwt, resolve });
+    const all = createAllHandlers({
+      backends: config.backends,
+      getUserJwt,
+      resolve,
+      sessionTtlMs: config.sessionTtlMs,
+    });
     app.post('/all/mcp', bearers.all, wrap(all.post));
     app.get('/all/mcp', bearers.all, wrap(all.get));
     app.delete('/all/mcp', bearers.all, wrap(all.del));

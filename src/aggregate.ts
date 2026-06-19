@@ -40,7 +40,7 @@ import { expiredSessionIds, principalKey } from './session.js';
 export { expiredSessionIds, principalKey } from './session.js';
 
 export const SYSTEM_PARAM = 'system';
-const DEFAULT_SESSION_TTL_MS = 30 * 60_000; // reap a session idle longer than this
+const DEFAULT_SESSION_TTL_MS = 30 * 24 * 60 * 60_000; // 30 days; server.ts overrides via config (HUB_SESSION_TTL_MINUTES)
 
 type JsonSchema = {
   type?: string;

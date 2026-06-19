@@ -87,7 +87,7 @@ export function createEnvHandlers(opts: {
 }): EnvHandlers {
   const { getUserJwt, resolve } = opts;
   const now = opts.now ?? Date.now;
-  const ttlMs = opts.sessionTtlMs ?? 30 * 60_000;
+  const ttlMs = opts.sessionTtlMs ?? 30 * 24 * 60 * 60_000; // 30 days; server.ts overrides via config
   const sessions = new Map<string, Session>();
 
   function closeSession(id: string): void {

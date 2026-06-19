@@ -19,6 +19,10 @@ export interface HubConfig {
   /** Mount the aggregated `/all/mcp` endpoint (one URL, all systems via a required
    *  `system` param). Opt-in via `HUB_ALL_ENDPOINT`; the per-system paths are the default. */
   allEndpoint: boolean;
+  /** Idle timeout (ms) after which a session — and its backend connection(s) — is reaped.
+   *  Active sessions refresh `lastSeen` on every request, so a long TTL never drops a working
+   *  session; it only delays cleaning up abandoned ones. Set via `HUB_SESSION_TTL_MINUTES`. */
+  sessionTtlMs: number;
 }
 
 const NAME_RE = /^[a-z0-9-]+$/;
@@ -71,5 +75,17 @@ export function loadHubConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
   });
 
   const allEndpoint = /^(1|true|yes|on)$/i.test((env.HUB_ALL_ENDPOINT ?? '').trim());
-  return { backends, allEndpoint };
+  return { backends, allEndpoint, sessionTtlMs: parseSessionTtlMs(env.HUB_SESSION_TTL_MINUTES) };
+}
+
+const DEFAULT_SESSION_TTL_MINUTES = 30 * 24 * 60; // 30 days — idle reaping only ever touches abandoned sessions
+
+/** Parse `HUB_SESSION_TTL_MINUTES` (a positive number of minutes) into milliseconds. */
+function parseSessionTtlMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SESSION_TTL_MINUTES * 60_000;
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    throw new Error(`HUB_SESSION_TTL_MINUTES must be a positive number of minutes — got ${JSON.stringify(raw)}.`);
+  }
+  return Math.round(minutes * 60_000);
 }
