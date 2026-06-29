@@ -7,15 +7,71 @@
 // use it ONLY to mount the shared AS (authorize/token/register/callback + AS
 // metadata + DCR) and add per-env protected-resource-metadata + bearer ourselves.
 
-import {
-  createChainedTokenVerifier,
-  createXsuaaTokenVerifier,
-  loadXsuaaCredentials,
-  resolveAppUrl,
-  setupHttpAuth,
-} from '@arc-mcp/xsuaa-auth';
+import { createXsuaaTokenVerifier, loadXsuaaCredentials, resolveAppUrl, setupHttpAuth } from '@arc-mcp/xsuaa-auth';
+import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import type { Express, Request, RequestHandler } from 'express';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { log } from './log.js';
+
+interface XsuaaCreds {
+  url: string;
+  clientid: string;
+  xsappname: string;
+}
+
+// Inbound is a RELAY gate, not the authorization boundary. @sap/xssec rejects a token
+// whose `aud` carries a *foreign* app (e.g. the backend `arc1-mcp`, which lands in the
+// token once a developer holds the `arc-mcp-hub Dev Admin` role collection + the backend
+// grants the scope). But the hub does not enforce any scope inbound — real authorization
+// happens at the per-user jwt-bearer exchange (XSUAA checks the user's entitlement) and at
+// the backend ARC-1. So when xssec rejects, we fall back to verifying only that the token
+// is (a) signed by THIS subaccount's XSUAA and (b) not expired — accepting it for relay
+// regardless of audience. A signature-valid same-subaccount token with no backend
+// entitlement still gets 0 backends at the exchange, so this opens no privilege path.
+function createLenientSubaccountVerifier(credentials: XsuaaCreds): (token: string) => Promise<AuthInfo> {
+  const base = credentials.url.replace(/\/$/, '');
+  const expectedHost = new URL(base).host;
+  const jwks = createRemoteJWKSet(new URL(`${base}/token_keys`));
+
+  return async (token: string): Promise<AuthInfo> => {
+    let payload: Record<string, unknown>;
+    try {
+      ({ payload } = await jwtVerify(token, jwks, { algorithms: ['RS256'], requiredClaims: ['exp'] }));
+    } catch (err) {
+      throw new InvalidTokenError(`lenient verify failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // Soft issuer-host check (signature already proves the signing subaccount).
+    const iss = typeof payload.iss === 'string' ? payload.iss : '';
+    if (iss) {
+      let issHost = '';
+      try {
+        issHost = new URL(iss).host;
+      } catch {
+        /* non-URL iss → treat as mismatch below */
+      }
+      if (issHost !== expectedHost) {
+        throw new InvalidTokenError('lenient verify: issuer host mismatch');
+      }
+    }
+    const clientId = (payload.azp as string) ?? (payload.cid as string) ?? (payload.client_id as string) ?? 'hub-user';
+    const userName = (payload.user_name as string) ?? undefined;
+    log.info('inbound: accepted via lenient subaccount verifier', {
+      clientId,
+      hasUser: !!userName,
+      aud: payload.aud,
+      iss,
+    });
+    return {
+      token,
+      clientId,
+      scopes: [],
+      expiresAt: typeof payload.exp === 'number' ? payload.exp : undefined,
+      extra: { userName, email: (payload.email as string) ?? undefined },
+    };
+  };
+}
 
 // The hub needs NO arc-1 resource scope of its own: the backend scope (arc1-mcp.admin)
 // reaches the exchanged token via the user's role collection at jwt-bearer time, NOT via
@@ -60,7 +116,20 @@ export function setupInboundAuth(app: Express, envNames: string[]): Record<strin
     required: true,
   });
 
-  const verifier = createChainedTokenVerifier({}, createXsuaaTokenVerifier(credentials, {}));
+  // xssec first (clean hub tokens validate normally); on rejection fall back to a
+  // signature+issuer-only check so foreign-aud tokens are still accepted for relay.
+  const xsuaaVerifier = createXsuaaTokenVerifier(credentials, {});
+  const lenientVerifier = createLenientSubaccountVerifier(credentials as XsuaaCreds);
+  const verifier = async (token: string): Promise<AuthInfo> => {
+    try {
+      return await xsuaaVerifier(token);
+    } catch (err) {
+      log.info('inbound: xssec rejected token, trying lenient fallback', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return await lenientVerifier(token);
+    }
+  };
 
   const bearers: Record<string, RequestHandler> = {};
   for (const env of envNames) {
