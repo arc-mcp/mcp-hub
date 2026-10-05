@@ -1,8 +1,12 @@
 # Build arc-mcp-hub — multi-system MCP hub
 
-> **Status:** Implemented + **live BTP e2e PASSED** 2026-06-18 — 12 backend tools + a real `SAPSearch`
+> **Historical implementation record — project retired.** The status and evidence below describe
+> the original build. See the [retirement notice](../../README.md) and
+> [migration guide](../migration-to-arc-1.md) for the replacement.
+
+> **Original implementation status:** Implemented + **live BTP e2e PASSED** 2026-06-18 — 12 backend tools + a real `SAPSearch`
 > read through the deployed hub, as the user (full chain: inbound auth → per-user OAuth2JWTBearer
-> exchange → proxy → SAP principal propagation). Ready to publish.
+> exchange → proxy → SAP principal propagation). This evidence predates retirement.
 
 ## Overview
 
