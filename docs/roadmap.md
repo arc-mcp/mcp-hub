@@ -1,7 +1,11 @@
 # Roadmap & open items
 
+> **Closed roadmap — project retired.** These entries are historical notes, not planned work.
+> They have not been transferred to ARC-1 or promised by its multi-system setup.
+> See the [retirement notice](../README.md) and [migration guide](migration-to-arc-1.md).
+
 What's deliberately deferred, researched-but-not-built, or noted for later. The hub's **shipped**
-scope is in the [README](../README.md); the full auth/transport decision journey lives in the arc-1
+scope is in the [historical README](legacy-readme.md); the full auth/transport decision journey lives in the arc-1
 repo's `docs/research/mcp-hub-multi-system.md`.
 
 ## Deferred by design

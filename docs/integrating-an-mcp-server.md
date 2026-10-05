@@ -1,5 +1,9 @@
 # Integrating an MCP server behind arc-mcp-hub
 
+> **Historical reference — project retired.** Do not onboard new backends to the hub.
+> ARC-1 multi-target mode covers SAP system/client targets; it is not a general MCP proxy.
+> See the [retirement notice](../README.md) and [migration guide](migration-to-arc-1.md).
+
 How to put **any** MCP server — not just ARC-1 — behind the hub: the hard requirements, what you
 change in your server, and where [`@arc-mcp/xsuaa-auth`](https://github.com/arc-mcp/xsuaa-auth) saves
 you work. Every BTP/XSUAA claim below links to a primary source ([References](#references)); the three

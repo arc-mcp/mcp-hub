@@ -1,3 +1,4 @@
+# Historical deployment only: mcp-hub is retired. See docs/migration-to-arc-1.md.
 # Simple `cf push` variant. Build first: `npm run build` (pushes the prebuilt dist/).
 # For a full MTA build+deploy, use mta.yaml instead.
 applications:

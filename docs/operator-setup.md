@@ -1,5 +1,9 @@
 # Operator setup
 
+> **Historical reference — project retired.** These steps are retained for existing installations
+> and rollback only. For the replacement, follow the [migration guide](migration-to-arc-1.md)
+> and [ARC-1 Multi-System Setup](https://docs.arc-1-mcp.com/multi-target-setup/).
+
 Step-by-step wiring to run `arc-mcp-hub` in front of your ARC-1 instances. Do this once per landscape,
 plus one short step per backend system. Everything here is BTP configuration — no code changes.
 
@@ -8,7 +12,7 @@ For the *requirements* behind these steps — and how to onboard a **non-ARC-1**
 
 > **Prerequisite:** the hub and all backend ARC-1 instances must be in the **same BTP subaccount**.
 > The per-user token exchange only maps the issuer within one subaccount (cross-subaccount fails with
-> `Unable to map issuer`). Cross-subaccount is on the roadmap, not in v1.
+> `Unable to map issuer`). Cross-subaccount is unsupported; the historical roadmap is closed.
 
 ---
 

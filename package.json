@@ -1,7 +1,7 @@
 {
   "name": "arc-mcp-hub",
   "version": "0.1.0",
-  "description": "Deterministic multi-system MCP hub for SAP BTP — one login, per-environment routing to ARC-1 backends.",
+  "description": "Retired MCP hub for SAP BTP; superseded by ARC-1 multi-system setup.",
   "type": "module",
   "private": true,
   "engines": {

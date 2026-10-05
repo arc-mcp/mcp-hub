@@ -1,5 +1,9 @@
 # Architecture
 
+> **Historical reference — project retired.** This describes the former hub, not ARC-1
+> multi-target mode. See the [retirement notice](../README.md) and
+> [migration guide](migration-to-arc-1.md).
+
 `arc-mcp-hub` is a transparent, deterministic MCP reverse proxy. It centralizes **auth and routing**
 while keeping the data plane (each backend's tool surface) fully separate. No server-side LLM.
 
